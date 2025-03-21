@@ -1,234 +1,173 @@
+from crewai import Agent, Task, Crew, LLM
 from crewai.tools import BaseTool
-import warnings
 import os
-from google.colab import userdata
-from crewai import LLM
-import smtplib
 import yagmail
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+import csv
+from dotenv import load_dotenv
 
-
-warnings.filterwarnings('ignore')
-
-from crewai.tools import BaseTool
+# Load environment variables
+load_dotenv()
 
 class NewsScraperTool(BaseTool):
     name: str = "NewsScraperTool"
-    description: str = "Scrapes news data from fitness websites"
+    description: str = "Scrapes news data from fitness websites and saves to CSV"
 
-    def _run(self, query: str) -> str:  # Notice the parameter is just 'query: str'
-        import requests
-        from bs4 import BeautifulSoup
-        import csv
-
-        # URL of the Healthline Health News page
-        url = "https://www.healthline.com/health-news"
-
+    def _run(self, query: str) -> str:
         try:
-            response = requests.get(url)
+            url = "https://www.healthline.com/health-news"
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
+            
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            
             soup = BeautifulSoup(response.text, 'html.parser')
-
-            # Data storage
             data = []
-
-            # Extracting health news articles
+            
             articles = soup.find_all("li", class_="css-18vzruc")
-
-            # Loop through each article to extract details
+            
             for article in articles:
                 try:
-                    # Extract title
-                    title_tag = article.find("h2", class_="css-1rjem4a")
-                    title = title_tag.text.strip() if title_tag else "No title"
-
-                    # Extract publication date
-                    date_tag = article.find("div", class_="css-5ry8xk")
-                    publication_date = date_tag.text.strip() if date_tag else "No date"
-
-                    # Extract description
-                    description_tag = article.find("p", class_="css-ur5q1p")
-                    description = description_tag.text.strip() if description_tag else "No description"
-
-                    # Extract link
-                    link_tag = article.find("a", class_="css-1wivj18")
-                    link = link_tag["href"] if link_tag else "No link"
-
-                    # Combine the extracted data
-                    data.append([title, publication_date, description, link])
-
+                    title = article.find("h2", class_="css-1rjem4a").text.strip()
+                    date = article.find("div", class_="css-5ry8xk").text.strip()
+                    description = article.find("p", class_="css-ur5q1p").text.strip()
+                    link = article.find("a", class_="css-1wivj18")["href"]
+                    data.append([title, date, description, link])
                 except Exception as e:
-                    print(f"Error processing an article: {e}")
+                    continue
 
-            # Save the data to a CSV file
-            csv_file = "healthline_health_news.csv"
+            csv_file = "health_news.csv"
             with open(csv_file, "w", newline="", encoding="utf-8") as file:
                 writer = csv.writer(file)
-                writer.writerow(["Title", "Publication Date", "Description", "Link"])
+                writer.writerow(["Title", "Date", "Description", "Link"])
                 writer.writerows(data)
-
+                
             return csv_file
         except Exception as e:
-            return f"Error scraping data: {str(e)}"
-
-news_scraper_tool = NewsScraperTool()
+            return f"Error: {str(e)}"
 
 class CSVReaderTool(BaseTool):
-  name: str = "CSVReaderTool"
-  description: str = "Reads CSV files"
+    name: str = "CSVReaderTool"
+    description: str = "Reads and processes CSV files"
 
-  def _run(self, path: str) -> str:
-    import pandas as pd
-
-    fitness_df = pd.read_csv("healthline_health_news.csv")
-
-    return fitness_df
-
-
-csv_reader_tool = CSVReaderTool()
-
-############     Under construction     ############
+    def _run(self, file_path: str) -> str:
+        try:
+            df = pd.read_csv(file_path)
+            return df.to_markdown(index=False)
+        except Exception as e:
+            return f"Error reading CSV: {str(e)}"
 
 class EmailSenderTool(BaseTool):
-  name: str = "EmailSenderTool"
-  description: str = "Sends emails"
+    name: str = "EmailSenderTool"
+    description: str = "Sends emails using Gmail"
 
-  def _run(self, email_add: str) -> str:
+    def _run(self, recipient: str, subject: str, body: str) -> str:
+        try:
+            yag = yagmail.SMTP(
+                user=os.getenv("GMAIL_USER"),
+                password=os.getenv("GMAIL_PASSWORD")
+            )
+            yag.send(
+                to=recipient,
+                subject=subject,
+                contents=body
+            )
+            return "Email sent successfully!"
+        except Exception as e:
+            return f"Error sending email: {str(e)}"
 
-    import smtplib
+# Initialize tools
+news_scraper = NewsScraperTool()
+csv_reader = CSVReaderTool()
+email_sender = EmailSenderTool()
 
-
-
-
-#os.environ['GOOGLE_API_KEY'] = userdata.get('GOOGLE_API_KEY')
-#os.environ['GEMINI_API_KEY'] = 'AIzaSyB0b_73xWChdCrmTtpPen1DzQ3vvFEoDL8'
-#g_api_key = os.environ['GOOGLE_API_KEY']
-
-
-os.environ['OPENAI_API_KEY'] = userdata.get('OPENAI_API_KEY')
-
-
+# Initialize LLM
 llm = LLM(model="gpt-4")
-#llm = LLM(model="gemini/gemini-1.5-pro")
 
-from crewai import Agent, Task, Crew
-
+# Create agents
 data_scraping_agent = Agent(
-    role="Data Scraping Agent",
-    goal="Scrape news data from fitness websites, save data to csv file and return the csv file name",
-    backstory="""You are a professional Data Scraping Engineer with years of experience in scraping data from different websites.
-                 Your task is to scrape news articles,
-                 save then into a csv file and
-                 pass the csv file name to the csv_reader_agent using the news_scraper_tool.""",
-    llm=llm,  # Use the properly configured LLM
-    tools=[news_scraper_tool],
-    allow_delegation=False,
-    verbose=True
-)
-
-csv_reader_agent = Agent(
-    role="CSV File Reader Agent",
-    goal="Read CSV File Data and return the data.",
-    backstory="""You are a CSV File expert.
-                 Your goal is to read the given csv file(by data scraping agent),
-                 pass the data as a pandas dataframe using the csv_reader_tool to the newsletter_generator_agent.""",
+    role="Data Scraping Specialist",
+    goal="Scrape health news data and save to CSV",
+    backstory="Expert web scraper with extensive experience in data extraction from health websites.",
+    tools=[news_scraper],
     llm=llm,
-    tools=[csv_reader_tool],
-    allow_delegation=False,
     verbose=True
 )
 
-newsletter_generator_agent = Agent(
-    role="Newsletter Generator Agent",
-    goal="Generate health-related newsletters from using the data.",
-    backstory="""You are an expert in generating newsletters.
-                 Take the data passed by the csv_reader_agent and,
-                 generate health-related newsletters using them.
-                 Showcase the final newsletters to the user.""",
+csv_processing_agent = Agent(
+    role="Data Processing Specialist",
+    goal="Process and analyze CSV data",
+    backstory="Skilled data analyst with expertise in data cleaning and preparation.",
+    tools=[csv_reader],
     llm=llm,
-    allow_delegation=False,
     verbose=True
 )
 
-data_scraping_task = Task(
-    description=(
-        "1. Scrape news data from fitness websites using the news_scraper_tool."
-        "2. Save the scraped data into a CSV file with appropriate formatting."
-        "3. Return the CSV file name to be used by the next agent."
-    ),
-    expected_output=(
-        "A CSV file containing the scraped news data from fitness websites."
-    ),
+newsletter_agent = Agent(
+    role="Health Newsletter Editor",
+    goal="Create engaging health newsletters",
+    backstory="Experienced health content writer with medical journalism background.",
+    llm=llm,
+    verbose=True
+)
+
+email_agent = Agent(
+    role="Email Communications Specialist",
+    goal="Send formatted newsletters via email",
+    tools=[email_sender],
+    llm=llm,
+    verbose=True
+)
+
+# Create tasks
+scraping_task = Task(
+    description="Scrape latest health news articles and save to CSV",
+    expected_output="CSV file containing health news data",
     agent=data_scraping_agent,
-    human_input=False
+    output_file="health_news.csv"
 )
 
-
-
-csv_reading_task = Task(
-    description=(
-        "1. Read the data from the provided CSV file using the csv_reader_tool."
-        "2. Convert the data into a pandas dataframe for easy manipulation and processing."
-        "3. Pass the dataframe to the newsletter_generator_agent for further use."
-    ),
-    expected_output=(
-        "A pandas dataframe containing the data from the CSV file."
-    ),
-    agent=csv_reader_agent,
-    human_input=False
+processing_task = Task(
+    description="Process CSV data into readable format for newsletter creation",
+    expected_output="Cleaned and formatted news data in markdown format",
+    agent=csv_processing_agent,
+    context=[scraping_task]
 )
 
-
-
-newsletter_generation_task = Task(
-    description=(
-        "1. Take the data passed by the csv_reader_agent."
-        "2. Generate health-related newsletters based on the data."
-        "3. Showcase the final newsletters to the user in an engaging and informative format."
-    ),
-    expected_output=(
-        "A set of health-related newsletters generated from the provided data, ready to be showcased to the user."
-    ),
-    agent=newsletter_generator_agent,
-    human_input=False
+newsletter_task = Task(
+    description="Create engaging newsletter from health news data",
+    expected_output="Well-formatted newsletter HTML content with key articles and summaries",
+    agent=newsletter_agent,
+    context=[processing_task]
 )
 
+email_task = Task(
+    description="Send newsletter via email to specified recipient",
+    expected_output="Confirmation of email delivery",
+    agent=email_agent,
+    context=[newsletter_task],
+    human_input=True
+)
 
-#email_sending_task =
-
+# Create and run crew
 newsletter_crew = Crew(
-    agents=[data_scraping_agent, csv_reader_agent, newsletter_generator_agent],
-    tasks=[data_scraping_task, csv_reading_task, newsletter_generation_task],
-    verbose=True,
-    process_type="sequential"  # Add explicit process type
+    agents=[data_scraping_agent, csv_processing_agent, newsletter_agent, email_agent],
+    tasks=[scraping_task, processing_task, newsletter_task, email_task],
+    verbose=2
 )
 
-user_query = input("Enter your business problem here:")
-result = newsletter_crew.kickoff(inputs={"user_query": user_query})
-
-
-# creates SMTP session
-s = smtplib.SMTP('smtp.gmail.com', 587)
-# start TLS for security
-s.starttls()
-# Authentication
-s.login("kainatraisa@gmail.com", "#Iamborntowin21")
-# message to be sent
-message = """Newsletter 3:
-Title: Carbonated Water May Promote Weight Loss, but There's a Catch
-Publication Date: January 22, 2025
-Description: New research suggests that drinking sparkling water could aid in weight loss. However, it's not as straightforward as it seems. Learn more about the benefits and potential risks. [Read More](https://www.healthline.com/health-news/could-sparkling-water-help-you-lose-weight-study-says-yes-with-catch)"""
-# sending the mail
-s.sendmail("kainatraisa@gmail.com", "kraisahossain@gmail.com", message)
-# terminating the session
-s.quit()
-
-
-
-
-
-yag = yagmail.SMTP("kainatraisa@gmail.com")
-yag.send(
-    to="kraisahossain@gmail.com",
-    subject="Automated Email",
-    contents="Hello, this is an automated email from Python!",
-)
-print("Email sent successfully!")
+if __name__ == "__main__":
+    # Get user input
+    recipient_email = input("Enter recipient email address: ")
+    newsletter_subject = input("Enter email subject: ")
+    
+    # Run the crew with user inputs
+    result = newsletter_crew.kickoff(inputs={
+        'recipient': recipient_email,
+        'subject': newsletter_subject
+    })
+    
+    print("\n\nProcess completed!")
+    print(result)
