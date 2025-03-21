@@ -7,9 +7,13 @@ import requests
 from bs4 import BeautifulSoup
 import csv
 from dotenv import load_dotenv
+import google.generativeai as genai
 
 # Load environment variables
 load_dotenv()
+
+# Configure Gemini
+genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
 
 class NewsScraperTool(BaseTool):
     name: str = "NewsScraperTool"
@@ -59,6 +63,31 @@ class CSVReaderTool(BaseTool):
         except Exception as e:
             return f"Error reading CSV: {str(e)}"
 
+class NewsletterGeneratorTool(BaseTool):
+    name: str = "NewsletterGeneratorTool"
+    description: str = "Generates newsletters using Gemini AI"
+
+    def _run(self, data: str) -> str:
+        try:
+            model = genai.GenerativeModel('gemini-pro')
+            prompt = f"""
+            Create a professional health newsletter using the following articles:
+            {data}
+
+            Include these elements:
+            1. Engaging introduction
+            2. 3-5 key highlights with summaries
+            3. Expert analysis section
+            4. Links to original articles
+            5. Closing recommendations
+
+            Format in clean HTML with proper headings and sections.
+            """
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            return f"Error generating newsletter: {str(e)}"
+
 class EmailSenderTool(BaseTool):
     name: str = "EmailSenderTool"
     description: str = "Sends emails using Gmail"
@@ -81,10 +110,8 @@ class EmailSenderTool(BaseTool):
 # Initialize tools
 news_scraper = NewsScraperTool()
 csv_reader = CSVReaderTool()
+newsletter_generator = NewsletterGeneratorTool()
 email_sender = EmailSenderTool()
-
-# Initialize LLM
-llm = LLM(model="gpt-4")
 
 # Create agents
 data_scraping_agent = Agent(
@@ -92,7 +119,6 @@ data_scraping_agent = Agent(
     goal="Scrape health news data and save to CSV",
     backstory="Expert web scraper with extensive experience in data extraction from health websites.",
     tools=[news_scraper],
-    llm=llm,
     verbose=True
 )
 
@@ -101,15 +127,14 @@ csv_processing_agent = Agent(
     goal="Process and analyze CSV data",
     backstory="Skilled data analyst with expertise in data cleaning and preparation.",
     tools=[csv_reader],
-    llm=llm,
     verbose=True
 )
 
 newsletter_agent = Agent(
     role="Health Newsletter Editor",
-    goal="Create engaging health newsletters",
-    backstory="Experienced health content writer with medical journalism background.",
-    llm=llm,
+    goal="Create engaging health newsletters using Gemini AI",
+    backstory="AI-powered content creator specialized in medical journalism.",
+    tools=[newsletter_generator],
     verbose=True
 )
 
@@ -117,7 +142,6 @@ email_agent = Agent(
     role="Email Communications Specialist",
     goal="Send formatted newsletters via email",
     tools=[email_sender],
-    llm=llm,
     verbose=True
 )
 
@@ -137,8 +161,8 @@ processing_task = Task(
 )
 
 newsletter_task = Task(
-    description="Create engaging newsletter from health news data",
-    expected_output="Well-formatted newsletter HTML content with key articles and summaries",
+    description="Create engaging newsletter from health news data using Gemini AI",
+    expected_output="Well-formatted newsletter HTML content with medical insights",
     agent=newsletter_agent,
     context=[processing_task]
 )
