@@ -1,7 +1,9 @@
 from crewai import Agent, Task, Crew
 from crewai.tools import BaseTool
 import os
-import yagmail
+import smtplib
+import ssl
+from email.message import EmailMessage
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -98,16 +100,44 @@ class NewsletterGeneratorTool(BaseTool):
 class EmailSenderTool(BaseTool):
     name: str = "EmailSenderTool"
     description: str = "Sends emails using Gmail"
+    default_recipient: str = "fliptechy09@gmail.com"
 
-    def _run(self, recipient: str, subject: str, body: str) -> str:
+    def _run(self, recipient: str = None, subject: str = "Health Newsletter", body: str = "") -> str:
         try:
-            yag = yagmail.SMTP(
-                user=os.getenv("GMAIL_USER"), password=os.getenv("GMAIL_PASSWORD")
-            )
-            yag.send(to=recipient, subject=subject, contents=body)
-            return "Email sent successfully!"
+            # Debug prints to verify inputs
+            print(f"\n🔧 DEBUG TOOL INPUTS 🔧")
+            print(f"Received recipient: {recipient}")
+            print(f"Default recipient: {self.default_recipient}")
+            
+            sender_email = os.getenv("GMAIL_USER")
+            recipient_email = self.default_recipient
+            if not isinstance(recipient_email, str) or "@" not in recipient_email:
+                recipient_email = self.default_recipient
+                print(f"⚠️ Invalid recipient, using default: {recipient_email}")
+            print(f"DEBUG: Final recipient - {recipient_email}")
+            password = os.getenv("GMAIL_PASSWORD")
+            
+            # Validate email format
+            if "@" not in recipient_email or "." not in recipient_email.split("@")[1]:
+                return f"Invalid email address: {recipient_email}"
+
+            # Create email message
+            msg = EmailMessage()
+            msg['Subject'] = subject
+            msg['From'] = sender_email
+            msg['To'] = recipient_email
+            msg.set_content(body, subtype='html')
+
+            # Send email using SMTP
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+                server.login(sender_email, password)
+                server.send_message(msg)
+                
+            return f"Email sent successfully to {recipient_email}"
         except Exception as e:
             return f"Error sending email: {str(e)}"
+
 
 # Initialize tools
 news_scraper = NewsScraperTool()
@@ -185,7 +215,11 @@ email_task = Task(
     expected_output="Confirmation of email delivery",
     agent=email_agent,
     context=[newsletter_task],
-    human_input=True,
+    inputs={
+        "recipient": "fliptechy09@gmail.com",
+        "subject": "Newsletter of the day",
+        "body": newsletter_task.output
+    }
 )
 
 # Create and run crew (remain unchanged from original)
@@ -196,12 +230,24 @@ newsletter_crew = Crew(
 )
 
 if __name__ == "__main__":
-    recipient_email = input("Enter recipient email address: ")
-    newsletter_subject = input("Enter email subject: ")
+    recipient_email = "fliptechy09@gmail.com"
+    newsletter_subject = "Newsletter of the day"
+    # Add this before the kickoff call
+    if "@" not in recipient_email or "." not in recipient_email.split("@")[1]:
+        raise ValueError(f"Invalid recipient email: {recipient_email}")
+    
+    print(f"\n🚀 STARTING PROCESS WITH:")
+    print(f"Recipient: {recipient_email}")
+    print(f"Subject: {newsletter_subject}")
 
     result = newsletter_crew.kickoff(
-        inputs={"recipient": recipient_email, "subject": newsletter_subject}
+        inputs={
+            "recipient": "fliptechy09@gmail.com",
+            "subject": newsletter_subject,
+            "body": newsletter_task.output  # Explicitly pass newsletter content
+        }
     )
 
-    print("\n\nProcess completed!")
+    print(f"\n\nProcess completed! Mail sent to {recipient_email}.")
+    print(f"\n📨 FINAL RESULT:")
     print(result)

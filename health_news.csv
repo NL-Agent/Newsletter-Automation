@@ -1,1 +1,8 @@
-health_news.csv
+The following represents the contents of health_news.csv.  Note that the actual data would depend on the websites scraped by NewsScraperTool and would contain many more rows.
+
+Headline,Source,URL,Date,Summary
+"New Study Links Diet Soda to Increased Risk of Heart Disease","Medical News Today","www.medicalnewstoday.com/articles/333333",2024-07-26,"A recent study suggests a correlation between regular consumption of diet soda and a higher risk of cardiovascular issues."
+"Exercise Shown to Improve Mental Well-being in Seniors","Harvard Health Publishing","www.health.harvard.edu/article/12345",2024-07-25,"Research indicates that regular physical activity significantly benefits the mental health of older adults."
+"Breakthrough in Cancer Treatment Shows Promise","The Lancet","www.thelancet.com/article/67890",2024-07-24,"A new cancer therapy is demonstrating encouraging results in clinical trials."
+"Importance of Sleep for Immune System Function Highlighted","National Institutes of Health","www.nih.gov/news/sleep-immunity",2024-07-23,"A recent report emphasizes the critical role of sufficient sleep in maintaining a strong immune system."
+"Mental Health Awareness Campaign Launched","World Health Organization","www.who.int/news/mental-health",2024-07-22,"A global campaign aims to raise awareness and reduce stigma surrounding mental health issues."
