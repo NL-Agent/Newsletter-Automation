@@ -1,4 +1,4 @@
-from crewai import Agent, Task, Crew, LLM
+from crewai import Agent, Task, Crew
 from crewai.tools import BaseTool
 import os
 import yagmail
@@ -7,13 +7,14 @@ import requests
 from bs4 import BeautifulSoup
 import csv
 from dotenv import load_dotenv
-import google.generativeai as genai
+from litellm import completion
+from langchain_community.chat_models import ChatLiteLLM
 
 # Load environment variables
 load_dotenv()
 
-# Configure Gemini
-genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+# Configure LiteLLM (automatically uses GEMINI_API_KEY from environment)
+os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY")
 
 class NewsScraperTool(BaseTool):
     name: str = "NewsScraperTool"
@@ -22,16 +23,18 @@ class NewsScraperTool(BaseTool):
     def _run(self, query: str) -> str:
         try:
             url = "https://www.healthline.com/health-news"
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
-            
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
+            }
+
             response = requests.get(url, headers=headers)
             response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
+
+            soup = BeautifulSoup(response.text, "html.parser")
             data = []
-            
+
             articles = soup.find_all("li", class_="css-18vzruc")
-            
+
             for article in articles:
                 try:
                     title = article.find("h2", class_="css-1rjem4a").text.strip()
@@ -47,7 +50,7 @@ class NewsScraperTool(BaseTool):
                 writer = csv.writer(file)
                 writer.writerow(["Title", "Date", "Description", "Link"])
                 writer.writerows(data)
-                
+
             return csv_file
         except Exception as e:
             return f"Error: {str(e)}"
@@ -69,7 +72,6 @@ class NewsletterGeneratorTool(BaseTool):
 
     def _run(self, data: str) -> str:
         try:
-            model = genai.GenerativeModel('gemini-pro')
             prompt = f"""
             Create a professional health newsletter using the following articles:
             {data}
@@ -83,8 +85,13 @@ class NewsletterGeneratorTool(BaseTool):
 
             Format in clean HTML with proper headings and sections.
             """
-            response = model.generate_content(prompt)
-            return response.text
+
+            response = completion(
+                model="gemini/gemini-1.5-flash",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.5
+            )
+            return response.choices[0].message.content
         except Exception as e:
             return f"Error generating newsletter: {str(e)}"
 
@@ -95,14 +102,9 @@ class EmailSenderTool(BaseTool):
     def _run(self, recipient: str, subject: str, body: str) -> str:
         try:
             yag = yagmail.SMTP(
-                user=os.getenv("GMAIL_USER"),
-                password=os.getenv("GMAIL_PASSWORD")
+                user=os.getenv("GMAIL_USER"), password=os.getenv("GMAIL_PASSWORD")
             )
-            yag.send(
-                to=recipient,
-                subject=subject,
-                contents=body
-            )
+            yag.send(to=recipient, subject=subject, contents=body)
             return "Email sent successfully!"
         except Exception as e:
             return f"Error sending email: {str(e)}"
@@ -113,13 +115,20 @@ csv_reader = CSVReaderTool()
 newsletter_generator = NewsletterGeneratorTool()
 email_sender = EmailSenderTool()
 
+# Configure Gemini LLM using LiteLLM
+llm = ChatLiteLLM(
+    model="gemini/gemini-1.5-flash",
+    temperature=0.5
+)
+
 # Create agents
 data_scraping_agent = Agent(
     role="Data Scraping Specialist",
     goal="Scrape health news data and save to CSV",
     backstory="Expert web scraper with extensive experience in data extraction from health websites.",
     tools=[news_scraper],
-    verbose=True
+    llm=llm,
+    verbose=True,
 )
 
 csv_processing_agent = Agent(
@@ -127,7 +136,8 @@ csv_processing_agent = Agent(
     goal="Process and analyze CSV data",
     backstory="Skilled data analyst with expertise in data cleaning and preparation.",
     tools=[csv_reader],
-    verbose=True
+    llm=llm,
+    verbose=True,
 )
 
 newsletter_agent = Agent(
@@ -135,36 +145,39 @@ newsletter_agent = Agent(
     goal="Create engaging health newsletters using Gemini AI",
     backstory="AI-powered content creator specialized in medical journalism.",
     tools=[newsletter_generator],
-    verbose=True
+    llm=llm,
+    verbose=True,
 )
 
 email_agent = Agent(
     role="Email Communications Specialist",
     goal="Send formatted newsletters via email",
+    backstory="A dedicated specialist focused on crafting and sending emails.",
     tools=[email_sender],
-    verbose=True
+    llm=llm,
+    verbose=True,
 )
 
-# Create tasks
+# Create tasks (remain unchanged from original)
 scraping_task = Task(
     description="Scrape latest health news articles and save to CSV",
     expected_output="CSV file containing health news data",
     agent=data_scraping_agent,
-    output_file="health_news.csv"
+    output_file="health_news.csv",
 )
 
 processing_task = Task(
     description="Process CSV data into readable format for newsletter creation",
     expected_output="Cleaned and formatted news data in markdown format",
     agent=csv_processing_agent,
-    context=[scraping_task]
+    context=[scraping_task],
 )
 
 newsletter_task = Task(
     description="Create engaging newsletter from health news data using Gemini AI",
     expected_output="Well-formatted newsletter HTML content with medical insights",
     agent=newsletter_agent,
-    context=[processing_task]
+    context=[processing_task],
 )
 
 email_task = Task(
@@ -172,26 +185,23 @@ email_task = Task(
     expected_output="Confirmation of email delivery",
     agent=email_agent,
     context=[newsletter_task],
-    human_input=True
+    human_input=True,
 )
 
-# Create and run crew
+# Create and run crew (remain unchanged from original)
 newsletter_crew = Crew(
     agents=[data_scraping_agent, csv_processing_agent, newsletter_agent, email_agent],
     tasks=[scraping_task, processing_task, newsletter_task, email_task],
-    verbose=2
+    verbose=True,
 )
 
 if __name__ == "__main__":
-    # Get user input
     recipient_email = input("Enter recipient email address: ")
     newsletter_subject = input("Enter email subject: ")
-    
-    # Run the crew with user inputs
-    result = newsletter_crew.kickoff(inputs={
-        'recipient': recipient_email,
-        'subject': newsletter_subject
-    })
-    
+
+    result = newsletter_crew.kickoff(
+        inputs={"recipient": recipient_email, "subject": newsletter_subject}
+    )
+
     print("\n\nProcess completed!")
     print(result)
