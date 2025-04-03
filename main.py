@@ -1,253 +1,112 @@
-from crewai import Agent, Task, Crew
-from crewai.tools import BaseTool
-import os
-import smtplib
-import ssl
-from email.message import EmailMessage
-import pandas as pd
+from dotenv import load_dotenv
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.graph import StateGraph, START, END, MessagesState
+from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_core.messages import SystemMessage, HumanMessage
 import requests
 from bs4 import BeautifulSoup
-import csv
-from dotenv import load_dotenv
-from litellm import completion
-from langchain_community.chat_models import ChatLiteLLM
+import pandas as pd
 
-# Load environment variables
+
+#set your Google api key as environment variable
 load_dotenv()
 
-# Configure LiteLLM (automatically uses GEMINI_API_KEY from environment)
-os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY")
 
-class NewsScraperTool(BaseTool):
-    name: str = "NewsScraperTool"
-    description: str = "Scrapes news data from fitness websites and saves to CSV"
-
-    def _run(self, query: str) -> str:
-        try:
-            url = "https://www.healthline.com/health-news"
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
-            }
-
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.text, "html.parser")
-            data = []
-
-            articles = soup.find_all("li", class_="css-18vzruc")
-
-            for article in articles:
-                try:
-                    title = article.find("h2", class_="css-1rjem4a").text.strip()
-                    date = article.find("div", class_="css-5ry8xk").text.strip()
-                    description = article.find("p", class_="css-ur5q1p").text.strip()
-                    link = article.find("a", class_="css-1wivj18")["href"]
-                    data.append([title, date, description, link])
-                except Exception as e:
-                    continue
-
-            csv_file = "health_news.csv"
-            with open(csv_file, "w", newline="", encoding="utf-8") as file:
-                writer = csv.writer(file)
-                writer.writerow(["Title", "Date", "Description", "Link"])
-                writer.writerows(data)
-
-            return csv_file
-        except Exception as e:
-            return f"Error: {str(e)}"
-
-class CSVReaderTool(BaseTool):
-    name: str = "CSVReaderTool"
-    description: str = "Reads and processes CSV files"
-
-    def _run(self, file_path: str) -> str:
-        try:
-            df = pd.read_csv(file_path)
-            return df.to_markdown(index=False)
-        except Exception as e:
-            return f"Error reading CSV: {str(e)}"
-
-class NewsletterGeneratorTool(BaseTool):
-    name: str = "NewsletterGeneratorTool"
-    description: str = "Generates newsletters using Gemini AI"
-
-    def _run(self, data: str) -> str:
-        try:
-            prompt = f"""
-            Create a professional health newsletter using the following articles:
-            {data}
-
-            Include these elements:
-            1. Engaging introduction
-            2. 3-5 key highlights with summaries
-            3. Expert analysis section
-            4. Links to original articles
-            5. Closing recommendations
-
-            Format in clean HTML with proper headings and sections.
-            """
-
-            response = completion(
-                model="gemini/gemini-1.5-flash",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.5
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            return f"Error generating newsletter: {str(e)}"
-
-class EmailSenderTool(BaseTool):
-    name: str = "EmailSenderTool"
-    description: str = "Sends emails using Gmail"
-    default_recipient: str = "fliptechy09@gmail.com"
-
-    def _run(self, recipient: str = None, subject: str = "Health Newsletter", body: str = "") -> str:
-        try:
-            # Debug prints to verify inputs
-            print(f"\n🔧 DEBUG TOOL INPUTS 🔧")
-            print(f"Received recipient: {recipient}")
-            print(f"Default recipient: {self.default_recipient}")
-            
-            sender_email = os.getenv("GMAIL_USER")
-            recipient_email = self.default_recipient
-            if not isinstance(recipient_email, str) or "@" not in recipient_email:
-                recipient_email = self.default_recipient
-                print(f"⚠️ Invalid recipient, using default: {recipient_email}")
-            print(f"DEBUG: Final recipient - {recipient_email}")
-            password = os.getenv("GMAIL_PASSWORD")
-            
-            # Validate email format
-            if "@" not in recipient_email or "." not in recipient_email.split("@")[1]:
-                return f"Invalid email address: {recipient_email}"
-
-            # Create email message
-            msg = EmailMessage()
-            msg['Subject'] = subject
-            msg['From'] = sender_email
-            msg['To'] = recipient_email
-            msg.set_content(body, subtype='html')
-
-            # Send email using SMTP
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-                server.login(sender_email, password)
-                server.send_message(msg)
-                
-            return f"Email sent successfully to {recipient_email}"
-        except Exception as e:
-            return f"Error sending email: {str(e)}"
+llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro")
 
 
-# Initialize tools
-news_scraper = NewsScraperTool()
-csv_reader = CSVReaderTool()
-newsletter_generator = NewsletterGeneratorTool()
-email_sender = EmailSenderTool()
+def news_scraper_tool() -> pd.DataFrame:
+    """
+    Scrapes health news from Healthline and returns a DataFrame with the data.
+    """
 
-# Configure Gemini LLM using LiteLLM
-llm = ChatLiteLLM(
-    model="gemini/gemini-1.5-flash",
-    temperature=0.5
-)
+    url = "https://www.healthline.com/health-news"
 
-# Create agents
-data_scraping_agent = Agent(
-    role="Data Scraping Specialist",
-    goal="Scrape health news data and save to CSV",
-    backstory="Expert web scraper with extensive experience in data extraction from health websites.",
-    tools=[news_scraper],
-    llm=llm,
-    verbose=True,
-)
-
-csv_processing_agent = Agent(
-    role="Data Processing Specialist",
-    goal="Process and analyze CSV data",
-    backstory="Skilled data analyst with expertise in data cleaning and preparation.",
-    tools=[csv_reader],
-    llm=llm,
-    verbose=True,
-)
-
-newsletter_agent = Agent(
-    role="Health Newsletter Editor",
-    goal="Create engaging health newsletters using Gemini AI",
-    backstory="AI-powered content creator specialized in medical journalism.",
-    tools=[newsletter_generator],
-    llm=llm,
-    verbose=True,
-)
-
-email_agent = Agent(
-    role="Email Communications Specialist",
-    goal="Send formatted newsletters via email",
-    backstory="A dedicated specialist focused on crafting and sending emails.",
-    tools=[email_sender],
-    llm=llm,
-    verbose=True,
-)
-
-# Create tasks (remain unchanged from original)
-scraping_task = Task(
-    description="Scrape latest health news articles and save to CSV",
-    expected_output="CSV file containing health news data",
-    agent=data_scraping_agent,
-    output_file="health_news.csv",
-)
-
-processing_task = Task(
-    description="Process CSV data into readable format for newsletter creation",
-    expected_output="Cleaned and formatted news data in markdown format",
-    agent=csv_processing_agent,
-    context=[scraping_task],
-)
-
-newsletter_task = Task(
-    description="Create engaging newsletter from health news data using Gemini AI",
-    expected_output="Well-formatted newsletter HTML content with medical insights",
-    agent=newsletter_agent,
-    context=[processing_task],
-)
-
-email_task = Task(
-    description="Send newsletter via email to specified recipient",
-    expected_output="Confirmation of email delivery",
-    agent=email_agent,
-    context=[newsletter_task],
-    inputs={
-        "recipient": "fliptechy09@gmail.com",
-        "subject": "Newsletter of the day",
-        "body": newsletter_task.output
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
-)
 
-# Create and run crew (remain unchanged from original)
-newsletter_crew = Crew(
-    agents=[data_scraping_agent, csv_processing_agent, newsletter_agent, email_agent],
-    tasks=[scraping_task, processing_task, newsletter_task, email_task],
-    verbose=True,
-)
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()  # Ensures we stop on bad responses
+    soup = BeautifulSoup(response.text, 'html.parser')
 
-if __name__ == "__main__":
-    recipient_email = "fliptechy09@gmail.com"
-    newsletter_subject = "Newsletter of the day"
-    # Add this before the kickoff call
-    if "@" not in recipient_email or "." not in recipient_email.split("@")[1]:
-        raise ValueError(f"Invalid recipient email: {recipient_email}")
-    
-    print(f"\n🚀 STARTING PROCESS WITH:")
-    print(f"Recipient: {recipient_email}")
-    print(f"Subject: {newsletter_subject}")
+    data = []
+    articles = soup.find_all("li", class_="css-yah9nt")  # Updated selector for articles
 
-    result = newsletter_crew.kickoff(
-        inputs={
-            "recipient": "fliptechy09@gmail.com",
-            "subject": newsletter_subject,
-            "body": newsletter_task.output  # Explicitly pass newsletter content
-        }
+    if not articles:
+        print("No articles found on the page.")
+        return pd.DataFrame()  # Return an empty DataFrame if no articles are found
+
+    for article in articles:
+        # Extract Title
+        title_tag = article.find("h2", class_="css-16o4j9x")
+        title = title_tag.text.strip() if title_tag else "No title"
+
+        # Extract Publication Date
+        date_tag = article.find("div", class_="css-5ry8xk")
+        publication_date = date_tag.text.strip() if date_tag else "No date"
+
+        # Extract Description
+        description_tag = article.find("p", class_="css-1hw29i9")
+        description = description_tag.text.strip() if description_tag else "No description"
+
+        # Extract Link
+        link_tag = article.find("a", class_="css-a63gyd")
+        link = link_tag["href"] if link_tag else "No link"
+        if not link.startswith("http"):
+            link = f"https://www.healthline.com{link}"
+
+        # Extract Image URL
+        image_tag = article.find("lazy-image")
+        image_url = image_tag["src"] if image_tag else "No image"
+
+        data.append([title, publication_date, description, link, image_url])
+
+    # Create DataFrame
+    df = pd.DataFrame(data, columns=["Title", "Publication Date", "Description", "Link", "Image URL"])
+
+    return df
+
+
+
+llm_with_tools = llm.bind_tools([news_scraper_tool])
+
+sys_msg = SystemMessage(
+    content=(
+        "You are an expert newsletter assistant capable of generating high-quality newsletters from real-time scraped news data. "
+        "Your task is to process the latest news, summarize key points, and format them into engaging newsletter-style content. "
+        "When a user requests specific topics (e.g., 'Give me 5 news about healthcare'), scrape relevant news, extract insights, "
+        "and generate the requested number of newsletters in a concise and informative manner."
     )
+)
 
-    print(f"\n\nProcess completed! Mail sent to {recipient_email}.")
-    print(f"\n📨 FINAL RESULT:")
-    print(result)
+
+def newsletter_assistant(state: MessagesState):
+    response = llm_with_tools.invoke([sys_msg] + state["messages"])
+
+    return {"messages": [response]}
+
+
+builder = StateGraph(MessagesState)
+
+builder.add_node("newsletter_assistant", newsletter_assistant)
+builder.add_node("tools", ToolNode([news_scraper_tool]))
+
+builder.add_edge(START, "newsletter_assistant")  # Fix: Use string instead of function reference
+
+builder.add_conditional_edges("newsletter_assistant", tools_condition)
+builder.add_edge("tools", "newsletter_assistant")
+
+
+graph = builder.compile()
+
+query = input("Hey, how can i help you?")
+
+messages = [HumanMessage(content=query)]
+messages = graph.invoke({"messages": messages})
+
+
+for m in messages["messages"]:
+    m.pretty_print()
+
+
