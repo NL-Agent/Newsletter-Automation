@@ -117,14 +117,54 @@ def news_scraper_tool() -> pd.DataFrame:
 
 llm_with_tools = llm.bind_tools([news_scraper_tool])
 
-sys_msg = SystemMessage(
-    content=(
-        "You are an expert newsletter assistant capable of generating high-quality newsletters from real-time scraped news data. "
-        "Your task is to process the latest news, summarize key points, and format them into engaging newsletter-style content. "
-        "When a user requests specific topics (e.g., 'Give me 5 news about healthcare'), scrape relevant news, extract insights, "
-        "and generate the requested number of newsletters in a concise and informative manner."
-    )
+single_content = True  # This should control the actual prompt construction
+
+format_instructions = (
+    "🔶 YOU ARE IN LIST CONTENT MODE (single_content=False):\n"
+    "1. Create 3-5 news items using:\n"
+    "   - <h3> for item headings\n"
+    "   - <ul> with <li> bullet points\n"
+    "   - Horizontal dividers between items\n"
+    "2. Each item contains:\n"
+    "   a. Concise 2-sentence summary\n"
+    "   b. 3 key points\n"
+    "   c. 1 relevant link\n"
+    "3. Prioritize scannability with clear hierarchy"
+) if not single_content else (
+    "🔷 YOU ARE IN SINGLE STORY MODE (single_content=True):\n"
+    "1. Create ONE in-depth story using:\n"
+    "   - <h2> for main headlines\n"
+    "   - <p> paragraphs with <span> highlights\n"
+    "   - Embedded links as <a href='...'>clean anchors</a>\n"
+    "2. Structure with:\n"
+    "   a. Contextual background\n"
+    "   b. Expert analysis\n"
+    "   c. Visual data representations\n"
+    "   d. Future implications"
+    "3. Don't use list:\n"
+    "   a. <ul> or <li> tag donn't use\n"
+    "   b. Generate in paragraph type, one single paragraph\n"
+    "   c. Don't make multiple headings and multiple paragraph or spans or images\n"
+    "4. Your work:\n"
+    "   a. Get the best match context and Make a Heading for that\n"
+    "   b. Get its content and Make a single nice formatted paragraph for that\n"
 )
+
+sys_msg = SystemMessage(
+    content=f"""
+    You are a professional newsletter architect. Current mode: {'Single Story' if single_content else 'List Format'}
+    
+    {format_instructions}
+    
+    GENERAL RULES:
+    • Never show raw URLs - always use <a> tags
+    • Maintain consistent styling with CSS classes
+    • Balance text/media ratio (30% visual elements)
+    • Include 1 primary CTA in footer
+    • Verify all links are HTTPS
+    • Mobile-optimized layout"""
+)
+
 
 
 def newsletter_assistant(state: MessagesState):
@@ -150,11 +190,36 @@ messages = [HumanMessage(content=prompt_message)]
 messages = graph.invoke({"messages": messages})
 
 # Get the newsletter content (here, assuming the LLM-generated response contains it)
-newsletter_content = ""
-for m in messages["messages"]:
-    # Assuming the response content is in m.content
-    newsletter_content += m.content
+if messages["messages"]:
+    # Extract only the final assistant message
+    last_message = messages["messages"][-1]
+    newsletter_content = last_message.content
+else:
+    newsletter_content = "No newsletter content generated."
+
+# Add HTML wrapper with basic styling
+formatted_newsletter = f"""
+<html>
+  <head>
+    <style>
+      body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
+      h1 {{ color: #2c3e50; }}
+      ul {{ list-style-type: none; padding: 0; }}
+      li {{ margin-bottom: 15px; padding: 10px; border-left: 3px solid #3498db; }}
+      a {{ color: #3498db; text-decoration: none; }}
+      .container {{ max-width: 600px; margin: 0 auto; }}
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>📬 Your Daily Health Brief</h1>
+      {newsletter_content}
+      <p style="color: #7f8c8d; margin-top: 30px;">Stay informed, stay healthy!<br>The Health Update Team</p>
+    </div>
+  </body>
+</html>
+"""
 
 # Sending the email
-subject = "Your Latest Health News Update"  # Example subject
-send_newsletter_via_email(subject, newsletter_content)
+subject = "🌡️ Your Latest Health News Update"
+send_newsletter_via_email(subject, formatted_newsletter)

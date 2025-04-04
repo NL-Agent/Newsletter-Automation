@@ -1,6 +1,7 @@
 {
     "newsletter": {
         "email_to": "sbxp1966@gmail.com",
-        "what_you_need": "Give me 5 news about healthcare"
+        "what_you_need": "I need the latest health news",
+        "single_content": true
     }
 }
