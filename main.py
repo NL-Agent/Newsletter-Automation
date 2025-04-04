@@ -24,64 +24,54 @@ prompt_message = config['newsletter']['what_you_need']
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro")
 
 # Email details from config
-smtp_server = "smtp.gmail.com"  # For Gmail, can change for others
-smtp_port = 587  # Standard port for TLS
-sender_email = email_user  # Sender's email address
-sender_password = email_password  # Email password or app-specific password
-recipient_email = email  # Retrieved from the config file
+smtp_server = "smtp.gmail.com"  
+smtp_port = 587  
+sender_email = email_user 
+sender_password = email_password  
+recipient_email = email
 
 def send_newsletter_via_email(subject: str, body: str):
     """
     Sends the generated newsletter as an email to the recipient.
     """
-    # Set up the MIME
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = recipient_email
     msg['Subject'] = subject
 
-    # Add body content to the email
     msg.attach(MIMEText(body, 'html'))
-
-    # Connect to the SMTP server and send the email
     try:
-        # Create SMTP session
         server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()  # Secure the connection
+        server.starttls()  
         server.login(sender_email, sender_password)
         text = msg.as_string()
 
-        # Send the email
         server.sendmail(sender_email, recipient_email, text)
-        server.quit()  # Terminate the session
+        server.quit()
 
         print(f"Newsletter sent to {recipient_email}")
 
     except Exception as e:
         print(f"Error sending email: {str(e)}")
 
-
 def news_scraper_tool() -> pd.DataFrame:
     """
     Scrapes health news from Healthline and returns a DataFrame with the data.
     """
-
     url = "https://www.healthline.com/health-news"
-
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
-
     response = requests.get(url, headers=headers)
-    response.raise_for_status()  # Ensures we stop on bad responses
+    response.raise_for_status()
     soup = BeautifulSoup(response.text, 'html.parser')
 
     data = []
-    articles = soup.find_all("li", class_="css-yah9nt")  # Updated selector for articles
+    articles = soup.find_all("li", class_="css-yah9nt")
 
     if not articles:
         print("No articles found on the page.")
-        return pd.DataFrame()  # Return an empty DataFrame if no articles are found
+        return pd.DataFrame()
 
     for article in articles:
         # Extract Title
@@ -117,7 +107,7 @@ def news_scraper_tool() -> pd.DataFrame:
 
 llm_with_tools = llm.bind_tools([news_scraper_tool])
 
-single_content = True  # This should control the actual prompt construction
+single_content = True  # Need this to move to config file
 
 format_instructions = (
     "🔶 YOU ARE IN LIST CONTENT MODE (single_content=False):\n"
@@ -178,7 +168,7 @@ builder = StateGraph(MessagesState)
 builder.add_node("newsletter_assistant", newsletter_assistant)
 builder.add_node("tools", ToolNode([news_scraper_tool]))
 
-builder.add_edge(START, "newsletter_assistant")  # Fix: Use string instead of function reference
+builder.add_edge(START, "newsletter_assistant") 
 
 builder.add_conditional_edges("newsletter_assistant", tools_condition)
 builder.add_edge("tools", "newsletter_assistant")
@@ -189,15 +179,12 @@ graph = builder.compile()
 messages = [HumanMessage(content=prompt_message)]
 messages = graph.invoke({"messages": messages})
 
-# Get the newsletter content (here, assuming the LLM-generated response contains it)
 if messages["messages"]:
-    # Extract only the final assistant message
     last_message = messages["messages"][-1]
     newsletter_content = last_message.content
 else:
     newsletter_content = "No newsletter content generated."
 
-# Add HTML wrapper with basic styling
 formatted_newsletter = f"""
 <html>
   <head>
@@ -220,6 +207,5 @@ formatted_newsletter = f"""
 </html>
 """
 
-# Sending the email
 subject = "🌡️ Your Latest Health News Update"
 send_newsletter_via_email(subject, formatted_newsletter)
