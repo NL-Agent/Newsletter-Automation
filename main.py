@@ -6,14 +6,18 @@ from langchain_core.messages import SystemMessage, HumanMessage
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
+import json
 
 
-#set your Google api key as environment variable
 load_dotenv()
 
+with open('config.json', 'r') as file:
+    config = json.load(file)
+
+email = config['newsletter']['email_to']
+prompt_message = config['newsletter']['what_you_need']
 
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro")
-
 
 def news_scraper_tool() -> pd.DataFrame:
     """
@@ -100,13 +104,9 @@ builder.add_edge("tools", "newsletter_assistant")
 
 graph = builder.compile()
 
-query = input("Hey, how can i help you?")
-
-messages = [HumanMessage(content=query)]
+messages = [HumanMessage(content=prompt_message)]
 messages = graph.invoke({"messages": messages})
 
 
 for m in messages["messages"]:
     m.pretty_print()
-
-
