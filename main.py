@@ -1,3 +1,4 @@
+import os
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, START, END, MessagesState
@@ -7,17 +8,58 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import json
-
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 load_dotenv()
+email_user = os.getenv("GMAIL_USER")
+email_password = os.getenv("GMAIL_PASSWORD")
 
 with open('config.json', 'r') as file:
     config = json.load(file)
-
 email = config['newsletter']['email_to']
 prompt_message = config['newsletter']['what_you_need']
 
 llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro")
+
+# Email details from config
+smtp_server = "smtp.gmail.com"  # For Gmail, can change for others
+smtp_port = 587  # Standard port for TLS
+sender_email = email_user  # Sender's email address
+sender_password = email_password  # Email password or app-specific password
+recipient_email = email  # Retrieved from the config file
+
+def send_newsletter_via_email(subject: str, body: str):
+    """
+    Sends the generated newsletter as an email to the recipient.
+    """
+    # Set up the MIME
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = recipient_email
+    msg['Subject'] = subject
+
+    # Add body content to the email
+    msg.attach(MIMEText(body, 'html'))
+
+    # Connect to the SMTP server and send the email
+    try:
+        # Create SMTP session
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()  # Secure the connection
+        server.login(sender_email, sender_password)
+        text = msg.as_string()
+
+        # Send the email
+        server.sendmail(sender_email, recipient_email, text)
+        server.quit()  # Terminate the session
+
+        print(f"Newsletter sent to {recipient_email}")
+
+    except Exception as e:
+        print(f"Error sending email: {str(e)}")
+
 
 def news_scraper_tool() -> pd.DataFrame:
     """
@@ -107,6 +149,12 @@ graph = builder.compile()
 messages = [HumanMessage(content=prompt_message)]
 messages = graph.invoke({"messages": messages})
 
-
+# Get the newsletter content (here, assuming the LLM-generated response contains it)
+newsletter_content = ""
 for m in messages["messages"]:
-    m.pretty_print()
+    # Assuming the response content is in m.content
+    newsletter_content += m.content
+
+# Sending the email
+subject = "Your Latest Health News Update"  # Example subject
+send_newsletter_via_email(subject, newsletter_content)
